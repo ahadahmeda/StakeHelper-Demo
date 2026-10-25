@@ -1,0 +1,89 @@
+
+name: Build StakeHelper Demo APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**.zip'
+      - '**/*.zip'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract ZIP automatically
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find "$GITHUB_WORKSPACE" \
+            -type f -iname '*.zip' \
+            ! -path '*/.git/*' | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::Repository-তে ZIP ফাইল পাওয়া যায়নি।"
+            find . -maxdepth 3 -type f
+            exit 1
+          fi
+
+          echo "ZIP found: $ZIP_FILE"
+          mkdir -p "$GITHUB_WORKSPACE/extracted"
+          unzip -o "$ZIP_FILE" \
+            -d "$GITHUB_WORKSPACE/extracted"
+
+      - name: Find Android Gradle project
+        shell: bash
+        run: |
+          set -e
+
+          SETTINGS=$(find extracted -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::ZIP-এর ভিতরে Android Gradle project পাওয়া যায়নি।"
+            echo "ZIP-এর ভিতরের ফাইল:"
+            find extracted -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project found: $PROJECT_DIR"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            echo "::error::Gradle wrapper নেই; সঠিক Gradle version নির্ধারণ করতে হবে।"
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StakeHelper-Demo-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
